@@ -14,12 +14,14 @@ const allowedOrigins = [
   'http://localhost:3000',
   'http://localhost:4173', // Vite preview
   'http://localhost:5000',
+  'http://localhost:8080',
 ];
 
 app.use(cors({
   origin: (origin, cb) => {
     // Izinkan request tanpa origin (Postman, ESP32, curl)
-    if (!origin || allowedOrigins.includes(origin)) return cb(null, true);
+    if (!origin || allowedOrigins.includes(origin)) 
+      return cb(null, true);
     cb(new Error(`Origin ${origin} tidak diizinkan oleh CORS`));
   },
   methods: ['GET', 'POST', 'PUT', 'DELETE'],
