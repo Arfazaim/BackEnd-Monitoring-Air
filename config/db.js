@@ -10,8 +10,9 @@ const pool = mysql.createPool({
   password          : process.env.DB_PASS     || process.env.MYSQL_ADDON_PASSWORD || '',
   database          : process.env.DB_NAME     || process.env.MYSQL_ADDON_DB       || 'data_air',
   waitForConnections: true,
-  // Vercel serverless: batasi koneksi agar tidak melebihi limit Clever Cloud (maks 5)
-  connectionLimit   : isProduction ? 2 : 10,
+  // SANGAT PENTING: Clever Cloud gratis maks 5 koneksi. 
+  // Set ke 1 agar aman saat Vercel membuka banyak instance serverless bersamaan.
+  connectionLimit   : 1, 
   queueLimit        : 0,
   charset           : 'utf8mb4',
   timezone          : '+07:00', // WIB
