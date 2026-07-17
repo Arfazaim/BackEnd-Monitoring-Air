@@ -4,11 +4,11 @@ require('dotenv').config();
 const isProduction = process.env.NODE_ENV === 'production';
 
 const pool = mysql.createPool({
-  host              : process.env.DB_HOST     || 'localhost',
-  port              : parseInt(process.env.DB_PORT || '3306'),
-  user              : process.env.DB_USER     || 'root',
-  password          : process.env.DB_PASS     || '',
-  database          : process.env.DB_NAME     || 'data_air',
+  host              : process.env.DB_HOST     || process.env.MYSQL_ADDON_HOST     || 'localhost',
+  port              : parseInt(process.env.DB_PORT || process.env.MYSQL_ADDON_PORT || '3306'),
+  user              : process.env.DB_USER     || process.env.MYSQL_ADDON_USER     || 'root',
+  password          : process.env.DB_PASS     || process.env.MYSQL_ADDON_PASSWORD || '',
+  database          : process.env.DB_NAME     || process.env.MYSQL_ADDON_DB       || 'data_air',
   waitForConnections: true,
   // Vercel serverless: batasi koneksi agar tidak melebihi limit Clever Cloud (maks 5)
   connectionLimit   : isProduction ? 2 : 10,
