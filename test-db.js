@@ -1,6 +1,6 @@
 const mysql = require('mysql2/promise');
 
-async function testDB() {
+async function insertDummy() {
   try {
     const conn = await mysql.createConnection({
       host: 'bqewt7bk6nx7my0d2mvn-mysql.services.clever-cloud.com',
@@ -10,11 +10,17 @@ async function testDB() {
       port: 3306,
       ssl: { rejectUnauthorized: false }
     });
-    const [rows] = await conn.query('SHOW TABLES');
-    console.log('Tables in DB:', rows);
+    
+    // Insert dummy data
+    await conn.query(`
+      INSERT INTO tb_sensor (ph, kekeruhan, tds, status, tegangan, ml_score, ml_confidence, ml_prediction) 
+      VALUES (7.2, 10.5, 150, 'Layak', 220, 15, 'Tinggi', 'Layak')
+    `);
+    
+    console.log('Dummy data berhasil ditambahkan!');
     await conn.end();
   } catch (err) {
-    console.error('DB Error:', err.message);
+    console.error('Error:', err.message);
   }
 }
-testDB();
+insertDummy();
