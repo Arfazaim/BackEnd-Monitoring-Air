@@ -51,9 +51,16 @@ app.use((req, _res, next) => {
   next();
 });
 
-// ── Route Utama ───────────────────────────────────────────────
-// Tampilan web di root (/) otomatis dilayani oleh express.static('public/index.html')
-// Untuk mengecek status backend dalam format JSON, gunakan /api/health
+// ── Health Check (tanpa API key) ──────────────────────────────
+app.get('/', (_req, res) => {
+  res.json({
+    status : 'ok',
+    service: 'Aqua Monitor API',
+    version: '2.0.0',
+    uptime : Math.floor(process.uptime()) + 's',
+    time   : new Date().toISOString(),
+  });
+});
 
 app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok', db: 'connected', time: new Date().toISOString() });
