@@ -1,0 +1,184 @@
+﻿<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Aqua Monitor — Panel Kontrol</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg: #0d1117; --surface: #161b22; --border: #30363d;
+      --text: #e6edf3; --muted: #8b949e; --blue: #58a6ff;
+      --green: #3fb950; --red: #f85149; --radius: 12px;
+    }
+    body {
+      font-family: 'Inter', sans-serif; background: var(--bg); color: var(--text);
+      min-height: 100vh; display: flex; flex-direction: column;
+      align-items: center; justify-content: center; padding: 24px;
+    }
+    .card {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 32px; width: 100%; max-width: 480px;
+    }
+    .header { text-align: center; margin-bottom: 28px; }
+    .header h1 { font-size: 1.5rem; font-weight: 700; margin-bottom: 4px; }
+    .header p { color: var(--muted); font-size: 0.875rem; }
+    .status-box {
+      background: #0d1117; border: 1px solid var(--border);
+      border-radius: 8px; padding: 20px; text-align: center;
+      margin-bottom: 28px; transition: border-color 0.3s;
+    }
+    .status-label { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); margin-bottom: 8px; }
+    .status-value { font-size: 1.75rem; font-weight: 700; transition: color 0.3s; }
+    .status-mode { font-size: 0.8rem; color: var(--muted); margin-top: 4px; }
+    .status-open  { color: var(--green); border-color: var(--green) !important; }
+    .status-closed{ color: var(--red);   border-color: var(--red) !important; }
+    .status-auto  { color: var(--blue);  border-color: var(--blue) !important; }
+    .btn-group { display: flex; flex-direction: column; gap: 12px; }
+    .btn {
+      width: 100%; padding: 14px 20px; border: none; border-radius: 8px;
+      font-family: 'Inter', sans-serif; font-size: 0.95rem; font-weight: 600;
+      cursor: pointer; transition: all 0.15s ease;
+      display: flex; align-items: center; justify-content: center; gap: 10px;
+    }
+    .btn:hover  { filter: brightness(1.15); transform: translateY(-1px); }
+    .btn:active { filter: brightness(0.9); transform: translateY(0); }
+    .btn:disabled { opacity: 0.4; cursor: not-allowed; transform: none; filter: none; }
+    .btn-open  { background: var(--green); color: #0d1117; }
+    .btn-close { background: var(--red); color: #fff; }
+    .btn-auto  { background: #21262d; color: var(--blue); border: 1px solid var(--blue); }
+    .divider {
+      display: flex; align-items: center; gap: 10px;
+      margin: 6px 0; color: var(--muted); font-size: 0.75rem;
+    }
+    .divider::before, .divider::after {
+      content: ''; flex: 1; height: 1px; background: var(--border);
+    }
+    .log {
+      margin-top: 24px; background: #0d1117; border: 1px solid var(--border);
+      border-radius: 8px; padding: 12px 16px; font-size: 0.8rem; color: var(--muted);
+      max-height: 120px; overflow-y: auto; font-family: 'Courier New', monospace;
+    }
+    .log-entry { margin-bottom: 4px; }
+    .log-entry.ok   { color: var(--green); }
+    .log-entry.err  { color: var(--red); }
+    .log-entry.info { color: var(--blue); }
+    .refresh-bar {
+      display: flex; align-items: center; justify-content: space-between;
+      margin-top: 12px; font-size: 0.75rem; color: var(--muted);
+    }
+    .dot {
+      width: 8px; height: 8px; border-radius: 50%; background: var(--green);
+      animation: pulse 2s infinite; display: inline-block; margin-right: 6px;
+    }
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+  </style>
+</head>
+<body>
+<div class="card">
+  <div class="header">
+    <h1>🚰 Panel Kontrol Keran</h1>
+    <p>Aqua Monitor — Test Solenoid Valve Manual</p>
+  </div>
+  <div class="status-box status-auto" id="statusBox">
+    <div class="status-label">Status Solenoid Valve</div>
+    <div class="status-value" id="statusValue">Memuat…</div>
+    <div class="status-mode" id="statusMode">—</div>
+  </div>
+  <div class="btn-group">
+    <button class="btn btn-open" id="btnOpen" onclick="setSolenoid(true)">
+      💧 Buka Keran (Manual)
+    </button>
+    <button class="btn btn-close" id="btnClose" onclick="setSolenoid(false)">
+      🔒 Tutup Keran (Manual)
+    </button>
+    <div class="divider">mode otomatis</div>
+    <button class="btn btn-auto" id="btnAuto" onclick="setSolenoid(null)">
+      🔄 Kembalikan ke Mode Otomatis
+    </button>
+  </div>
+  <div class="log" id="log">
+    <div class="log-entry info">[System] Panel siap. Menunggu perintah…</div>
+  </div>
+  <div class="refresh-bar">
+    <span><span class="dot"></span>Status diperbarui otomatis tiap 3 detik</span>
+    <span id="lastUpdate">—</span>
+  </div>
+</div>
+<script>
+  const BASE = window.location.origin;
+  const API  = BASE + '/api/actuator/solenoid';
+
+  function addLog(msg, type) {
+    type = type || 'info';
+    var log = document.getElementById('log');
+    var ts  = new Date().toLocaleTimeString('id-ID');
+    var div = document.createElement('div');
+    div.className = 'log-entry ' + type;
+    div.textContent = '[' + ts + '] ' + msg;
+    log.insertBefore(div, log.firstChild);
+    while (log.children.length > 20) log.removeChild(log.lastChild);
+  }
+
+  function applyStatus(data) {
+    var box  = document.getElementById('statusBox');
+    var val  = document.getElementById('statusValue');
+    var mode = document.getElementById('statusMode');
+    box.className = 'status-box';
+    if (data.mode === 'auto') {
+      val.textContent  = 'Otomatis';
+      mode.textContent = 'Dikendalikan kualitas air';
+      box.classList.add('status-auto');
+    } else if (data.solenoid === true) {
+      val.textContent  = 'TERBUKA';
+      mode.textContent = 'Override Manual — keran dibuka';
+      box.classList.add('status-open');
+    } else {
+      val.textContent  = 'TERTUTUP';
+      mode.textContent = 'Override Manual — keran ditutup';
+      box.classList.add('status-closed');
+    }
+    document.getElementById('lastUpdate').textContent = 'Update: ' + new Date().toLocaleTimeString('id-ID');
+  }
+
+  function fetchStatus() {
+    fetch(API)
+      .then(function(r){ return r.json(); })
+      .then(function(data){ applyStatus(data); })
+      .catch(function(){
+        document.getElementById('statusValue').textContent = 'Tidak Terhubung';
+        document.getElementById('statusMode').textContent  = 'Backend offline atau IP salah';
+        document.getElementById('statusBox').className = 'status-box status-closed';
+      });
+  }
+
+  function setSolenoid(state) {
+    var btns = document.querySelectorAll('.btn');
+    btns.forEach(function(b){ b.disabled = true; });
+    var label = state === null ? 'Mode Otomatis' : (state ? 'Buka Keran' : 'Tutup Keran');
+    addLog('Mengirim perintah: ' + label + '...', 'info');
+    fetch(API, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ state: state })
+    })
+    .then(function(r){ return r.json(); })
+    .then(function(data){
+      if (data.success) {
+        applyStatus(data);
+        addLog(data.message, 'ok');
+        addLog('ESP32 akan menerapkan dalam 5 detik (siklus kirim sensor)', 'info');
+      } else {
+        addLog('Gagal: ' + (data.message || 'Unknown error'), 'err');
+      }
+    })
+    .catch(function(e){ addLog('Error koneksi: ' + e.message, 'err'); })
+    .finally(function(){ btns.forEach(function(b){ b.disabled = false; }); });
+  }
+
+  fetchStatus();
+  setInterval(fetchStatus, 3000);
+</script>
+</body>
+</html>

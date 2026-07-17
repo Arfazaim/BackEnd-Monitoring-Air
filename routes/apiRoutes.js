@@ -1,16 +1,58 @@
-const express = require('express');
-const db      = require('../config/db');
-const { getSensorData, addSensorData } = require('../controllers/sensorController');
+const express  = require('express');
+const db       = require('../config/db');
+const { getSensorData, addSensorData, getLatestSensorData, getManualOverride, setManualOverride } = require('../controllers/sensorController');
 const { apiKeyMiddleware } = require('../middleware/auth');
+const mlRoutes = require('./mlRoutes');
 
 const router = express.Router();
+
+// ── ML Routes ─────────────────────────────────────────────────
+router.use('/ml', mlRoutes);
 
 // ── Sensor Data ────────────────────────────────────────────────
 // GET: Frontend mengambil data (tanpa API key — cukup koneksi jaringan lokal)
 router.get('/sensors', getSensorData);
 
+// GET: Ambil hanya 1 data terbaru (lebih ringan untuk polling)
+router.get('/latest', getLatestSensorData);
+
 // POST: ESP32 mengirim data (wajib API key)
 router.post('/sensors', apiKeyMiddleware, addSensorData);
+
+// ── Aktuator Manual (untuk testing dari panel) ────────────────────
+// GET: Cek status override solenoid saat ini
+router.get('/actuator/solenoid', (_req, res) => {
+  const override = getManualOverride();
+  res.json({
+    success  : true,
+    mode     : override === null ? 'auto' : 'manual',
+    solenoid : override,
+    label    : override === null ? 'Otomatis' : (override ? 'BUKA (Manual)' : 'TUTUP (Manual)'),
+  });
+});
+
+// POST: Set override solenoid secara manual
+// Body: { "state": true }    → paksa buka
+// Body: { "state": false }   → paksa tutup
+// Body: { "state": null }    → kembali ke mode otomatis
+router.post('/actuator/solenoid', (req, res) => {
+  const { state } = req.body;
+  const newState = (state === null || state === undefined) ? null : Boolean(state);
+  setManualOverride(newState);
+
+  const modeLabel = newState === null
+    ? 'Mode otomatis aktif — solenoid dikendalikan kualitas air'
+    : (newState ? '✅ Solenoid DIBUKA secara manual' : '🔴 Solenoid DITUTUP secara manual');
+
+  console.log(`[Actuator] Override solenoid: ${modeLabel}`);
+
+  res.json({
+    success  : true,
+    mode     : newState === null ? 'auto' : 'manual',
+    solenoid : newState,
+    message  : modeLabel,
+  });
+});
 
 // ── Logs ───────────────────────────────────────────────────────
 router.get('/logs', async (req, res) => {

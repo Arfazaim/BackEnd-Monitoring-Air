@@ -5,16 +5,25 @@ require('dotenv').config();
 const apiRoutes  = require('./routes/apiRoutes');
 const { apiKeyMiddleware } = require('./middleware/auth');
 
+const path = require('path');
+
 const app  = express();
 const PORT = process.env.PORT || 5000;
 
 // ── CORS ──────────────────────────────────────────────────────
+// Untuk cloud deployment, set env CORS_ORIGIN ke URL frontend production
+// Contoh: CORS_ORIGIN=https://aqua-monitor.vercel.app
 const allowedOrigins = [
-  'http://localhost:5173', // Vite dev
+  'http://localhost:5173',       // Vite dev default
   'http://localhost:3000',
-  'http://localhost:4173', // Vite preview
+  'http://localhost:4173',       // Vite preview
   'http://localhost:5000',
-  'http://localhost:8080',
+  'http://localhost:8080',       // Vite custom port
+  'http://192.168.1.2:8080',    // Frontend via IP lokal router
+  'http://192.168.1.2:5173',    // Vite dev via IP lokal
+  'http://192.168.137.1:8080',  // Frontend via IP hotspot Windows
+  'http://192.168.137.1:5173',  // Vite dev via hotspot
+  ...(process.env.CORS_ORIGIN ? process.env.CORS_ORIGIN.split(',').map(s => s.trim()) : []),
 ];
 
 app.use(cors({
@@ -27,6 +36,9 @@ app.use(cors({
   methods: ['GET', 'POST', 'PUT', 'DELETE'],
   allowedHeaders: ['Content-Type', 'x-api-key'],
 }));
+
+// ── Static Files (panel test aktuator) ────────────────────────
+app.use(express.static(path.join(__dirname, 'public')));
 
 // ── Body Parser ───────────────────────────────────────────────
 app.use(express.json({ limit: '10kb' }));
@@ -81,6 +93,7 @@ app.listen(PORT, () => {
   console.log('─────────────────────────────────────');
   console.log(`  Aqua Monitor Backend v2.0`);
   console.log(`  Server  : http://localhost:${PORT}`);
+  console.log(`  Panel   : http://localhost:${PORT}/panel.html`);
   console.log(`  Mode    : ${process.env.NODE_ENV || 'development'}`);
   console.log(`  DB      : ${process.env.DB_NAME}@${process.env.DB_HOST}`);
   console.log('─────────────────────────────────────');

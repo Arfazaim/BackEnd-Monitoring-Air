@@ -11,13 +11,17 @@ USE data_air;
 
 -- ── Tabel sensor utama ────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS tb_sensor (
-  id          INT UNSIGNED   NOT NULL AUTO_INCREMENT,
-  ph          DECIMAL(5,3)   NOT NULL,
-  kekeruhan   DECIMAL(8,3)   NOT NULL COMMENT 'Turbidity dalam NTU',
-  tds         DECIMAL(8,3)   NOT NULL COMMENT 'Total Dissolved Solids dalam ppm',
-  tegangan    DECIMAL(5,3)   NOT NULL COMMENT 'Tegangan baterai ESP32 dalam Volt',
-  status      ENUM('Layak','Tidak Layak') NOT NULL DEFAULT 'Layak',
-  created_at  TIMESTAMP      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  id             INT UNSIGNED   NOT NULL AUTO_INCREMENT,
+  ph             DECIMAL(5,3)   NOT NULL,
+  kekeruhan      DECIMAL(8,3)   NOT NULL COMMENT 'Turbidity dalam NTU',
+  tds            DECIMAL(8,3)   NOT NULL COMMENT 'Total Dissolved Solids dalam ppm',
+  tegangan       DECIMAL(7,2)   NOT NULL COMMENT 'Tegangan AC Jaringan dari ZMPT101B dalam Volt',
+  status         ENUM('Layak','Tidak Layak') NOT NULL DEFAULT 'Layak',
+  -- ML predictions (NULL jika ML service belum aktif)
+  ml_score       DECIMAL(5,2)   NULL COMMENT 'Probabilitas Tidak Layak dari ML 0-100 (%)',
+  ml_confidence  ENUM('Tinggi','Sedang','Rendah') NULL COMMENT 'Tingkat keyakinan prediksi ML',
+  ml_prediction  ENUM('Layak','Tidak Layak') NULL COMMENT 'Prediksi label dari model ML terbaik',
+  created_at     TIMESTAMP      NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (id),
   INDEX idx_created_at (created_at DESC),
   INDEX idx_status (status)
@@ -47,13 +51,3 @@ CREATE TABLE IF NOT EXISTS tb_config (
 -- Sisipkan baris konfigurasi default
 INSERT IGNORE INTO tb_config (id, offset_ph, offset_tds, offset_kekeruhan)
 VALUES (1, 0, 0, 0);
-
--- ============================================================
--- Contoh data dummy untuk testing
--- ============================================================
-INSERT INTO tb_sensor (ph, kekeruhan, tds, tegangan, status) VALUES
-  (7.20, 5.5,  210, 4.1, 'Layak'),
-  (7.35, 8.2,  280, 4.0, 'Layak'),
-  (6.80, 18.5, 350, 3.9, 'Layak'),
-  (6.40, 30.0, 520, 3.8, 'Tidak Layak'),
-  (7.10, 12.0, 290, 4.1, 'Layak');

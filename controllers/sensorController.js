@@ -1,6 +1,36 @@
 const db    = require('../config/db');
 const axios = require('axios');
 
+// ── Konfigurasi ML Service ────────────────────────────────────
+const ML_API = process.env.ML_API_URL || 'http://localhost:8000';
+
+// ── Panggil Python ML Service ─────────────────────────────────
+// Mengembalikan null jika ML service offline (graceful fallback)
+const callMLService = async (ph, kekeruhan, tds) => {
+  try {
+    const { data } = await axios.post(`${ML_API}/predict`, {
+      ph, kekeruhan, tds,
+    }, { timeout: 3000 }); // Timeout 3 detik agar tidak memperlambat ESP32
+
+    return {
+      ml_score      : data.best.score,
+      ml_confidence : data.best.score >= 75 || data.best.score <= 25 ? 'Tinggi'
+                    : data.best.score >= 60 || data.best.score <= 40 ? 'Sedang' : 'Rendah',
+      ml_prediction : data.best.prediction,
+      ml_detail     : {
+        rf: data.rf,
+        dt: data.dt,
+        nb: data.nb,
+        best_model: data.best_model,
+        confidence: data.confidence,
+      },
+    };
+  } catch {
+    // ML service tidak aktif — tidak blokir alur utama
+    return null;
+  }
+};
+
 // ── Thresholds (bisa override via env) ───────────────────────
 const THRESHOLDS = {
   ph_min         : parseFloat(process.env.PH_MIN          || '6.5'),
@@ -13,6 +43,15 @@ const THRESHOLDS = {
 // ── Alert cooldown (hindari spam Telegram) ────────────────────
 let lastAlertTime = 0;
 const ALERT_COOLDOWN_MS = 5 * 60 * 1000; // 5 menit
+
+// ── Manual Override Solenoid ──────────────────────────────────
+// null  = mode otomatis (berdasarkan kualitas air)
+// true  = paksa BUKA keran (untuk testing)
+// false = paksa TUTUP keran
+let manualSolenoidOverride = null;
+
+const setManualOverride = (value) => { manualSolenoidOverride = value; };
+const getManualOverride = () => manualSolenoidOverride;
 
 // ── Kirim notifikasi Telegram ─────────────────────────────────
 const sendTelegramAlert = async (message) => {
@@ -89,11 +128,11 @@ const addSensorData = async (req, res) => {
   if (phVal < 0 || phVal > 14)          return res.status(400).json({ success: false, message: 'Nilai pH tidak valid (0-14)' });
   if (kekeruhanVal < 0 || kekeruhanVal > 10000) return res.status(400).json({ success: false, message: 'Nilai kekeruhan tidak valid' });
 
-  // Terapkan kalibrasi offset
+  // Terapkan kalibrasi offset (parseFloat memastikan nilai offset dari DB tidak string)
   const cal = await getCalibrationOffsets();
-  const phCalibrated         = parseFloat((phVal        + (cal.offset_ph         || 0)).toFixed(3));
-  const kekeruhanCalibrated  = parseFloat((kekeruhanVal + (cal.offset_kekeruhan  || 0)).toFixed(3));
-  const tdsCalibrated        = parseFloat((tdsVal       + (cal.offset_tds        || 0)).toFixed(3));
+  const phCalibrated         = parseFloat((phVal        + parseFloat(cal.offset_ph         || 0)).toFixed(3));
+  const kekeruhanCalibrated  = parseFloat((kekeruhanVal + parseFloat(cal.offset_kekeruhan  || 0)).toFixed(3));
+  const tdsCalibrated        = parseFloat((tdsVal       + parseFloat(cal.offset_tds        || 0)).toFixed(3));
 
   // Logika kelayakan
   const isLayak = (
@@ -104,23 +143,28 @@ const addSensorData = async (req, res) => {
   );
   const status = isLayak ? 'Layak' : 'Tidak Layak';
 
-  // Logika aktuator
-  const pumpPacOn = kekeruhanCalibrated > THRESHOLDS.turbidity_max;
-  const buzzerOn  = !isLayak;
+  // Logika aktuator — Manual override mengalahkan logika otomatis
+  // null = otomatis, true = paksa buka, false = paksa tutup
+  const solenoidOn = manualSolenoidOverride !== null ? manualSolenoidOverride : !isLayak;
+  const mode = manualSolenoidOverride !== null ? 'manual' : 'auto';
 
   try {
-    // 1. Simpan data
-    await db.query(
-      'INSERT INTO tb_sensor (ph, kekeruhan, tds, status, tegangan) VALUES (?, ?, ?, ?, ?)',
-      [phCalibrated, kekeruhanCalibrated, tdsCalibrated, status, teganganVal]
-    );
+    // ── Panggil ML Service (paralel, tidak blokir jika offline) ──
+    const mlResult = await callMLService(phCalibrated, kekeruhanCalibrated, tdsCalibrated);
 
-    // 2. Log aktuator jika pump aktif
-    if (pumpPacOn) {
+    // ── 1. Simpan data sensor + hasil ML ─────────────────────────
+    if (mlResult) {
       await db.query(
-        'INSERT INTO tb_logs (nama_aktuator, obat_digunakan, keterangan) VALUES (?, ?, ?)',
-        ['Dosing Pump 1', 'PAC (Poly Aluminium Chloride)',
-         `Kekeruhan tinggi: ${kekeruhanCalibrated.toFixed(1)} NTU (batas ${THRESHOLDS.turbidity_max} NTU)`]
+        `INSERT INTO tb_sensor
+         (ph, kekeruhan, tds, status, tegangan, ml_score, ml_confidence, ml_prediction)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        [phCalibrated, kekeruhanCalibrated, tdsCalibrated, status, teganganVal,
+         mlResult.ml_score, mlResult.ml_confidence, mlResult.ml_prediction]
+      );
+    } else {
+      await db.query(
+        'INSERT INTO tb_sensor (ph, kekeruhan, tds, status, tegangan) VALUES (?, ?, ?, ?, ?)',
+        [phCalibrated, kekeruhanCalibrated, tdsCalibrated, status, teganganVal]
       );
     }
 
@@ -138,19 +182,27 @@ const addSensorData = async (req, res) => {
         `⚠️ <b>PERINGATAN — Kualitas Air Buruk!</b>\n\n` +
         reasons.join('\n') +
         `\n\nWaktu: ${new Date().toLocaleString('id-ID')}\n` +
-        `Status: <b>${status}</b> | Tegangan: ${teganganVal}V`
+        `Status: <b>${status}</b> | Tegangan AC: ${teganganVal}V\n` +
+        `Solenoid Valve: <b>${solenoidOn ? 'DIBUKA' : 'TERTUTUP'}</b>`
       );
     }
 
-    // 4. Balas ke ESP32
+    // ── 3. Balas ke ESP32 + sertakan prediksi ML ─────────────────
     res.status(201).json({
       success   : true,
       status_air: status,
       calibrated: { ph: phCalibrated, kekeruhan: kekeruhanCalibrated, tds: tdsCalibrated },
       commands  : {
-        pump_pac: pumpPacOn,
-        buzzer  : buzzerOn,
+        solenoid: solenoidOn,
+        mode,
       },
+      // ML prediction (null jika ML service offline)
+      ml: mlResult ? {
+        score      : mlResult.ml_score,
+        confidence : mlResult.ml_confidence,
+        prediction : mlResult.ml_prediction,
+        detail     : mlResult.ml_detail,
+      } : null,
     });
   } catch (error) {
     console.error('[addSensorData]', error.message);
@@ -158,4 +210,20 @@ const addSensorData = async (req, res) => {
   }
 };
 
-module.exports = { getSensorData, addSensorData };
+// ── GET /api/latest ──────────────────────────────────────────
+const getLatestSensorData = async (req, res) => {
+  try {
+    const [[row]] = await db.query(
+      'SELECT * FROM tb_sensor ORDER BY created_at DESC LIMIT 1'
+    );
+    if (!row) {
+      return res.status(404).json({ success: false, message: 'Belum ada data sensor.' });
+    }
+    res.status(200).json({ success: true, data: row });
+  } catch (error) {
+    console.error('[getLatestSensorData]', error.message);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+module.exports = { getSensorData, addSensorData, getLatestSensorData, getManualOverride, setManualOverride };
