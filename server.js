@@ -23,6 +23,7 @@ const allowedOrigins = [
   'http://192.168.1.2:5173',    // Vite dev via IP lokal
   'http://192.168.137.1:8080',  // Frontend via IP hotspot Windows
   'http://192.168.137.1:5173',  // Vite dev via hotspot
+  'https://front-end-monitoring-air.vercel.app', // Frontend production Vercel
   ...(process.env.CORS_ORIGIN ? process.env.CORS_ORIGIN.split(',').map(s => s.trim()) : []),
 ];
 
